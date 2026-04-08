@@ -1,49 +1,54 @@
-# PRD: Agent Task Center
+# Agent Task Center
 
-## Background
+## 需求背景
 
-当前 zcode 的 task-cli 是纯本地文件系统工具，任务数据（index.json）存在于单个项目目录中。这带来以下限制：
+### 为什么做（原因）
+
+当前 zcode 的 task-cli 是纯本地文件系统工具，任务数据（index.json）存在于单个项目目录中，带来以下限制：
 
 1. **无法集中管理** — 无法在一个地方查看多个项目的任务状态
 2. **无可视化** — 缺少任务依赖图和执行进度的可视化
 3. **无共享** — 多 agent 各自操作本地文件，无法共享任务状态
 4. **无追踪** — 缺少执行历史和 agent 活动追踪
 
-### 目标用户
+### 要做什么（对象）
+
+构建 Agent Task Center —— 一个集中化的任务管理服务，包含：
+- Go 后端 REST API 服务
+- Vue3 Web UI（任务看板、依赖图、执行记录）
+- task-cli 远程模式扩展
+
+### 用户是谁（人员）
 
 | 用户 | 交互方式 | 核心需求 |
 |------|---------|---------|
 | 开发者/管理者 | Web UI | 查看多项目任务看板、监控执行进度 |
 | AI Agent（Claude Code、Codex 等） | task-cli 远程模式 | 领取/管理任务，与现有工作流无缝衔接 |
 
-## Goals
+## 需求目标
 
-1. **集中化任务管理** — 提供统一的任务中心，管理多个项目的任务生命周期
-2. **Agent 友好** — AI agent 通过 task-cli 远程模式无缝接入，零学习成本
-3. **可视化看板** — 通过 Web UI 直观展示任务状态、依赖关系和执行进度
-4. **执行追踪** — 记录每个任务的执行历史，支持回顾和分析
-
-### 成功指标
-
-- task-cli 切换到远程模式后，所有现有命令（claim、record、status 等）正常工作
-- Web UI 能实时反映任务状态变更
-- 支持至少 3 个 agent 同时领取不同任务而不冲突
+| 目标 | 量化指标 | 说明 |
+|------|----------|------|
+| 集中化任务管理 | 支持管理 ≥3 个项目的任务 | 统一任务中心，消除项目间切换 |
+| Agent 零学习成本接入 | task-cli 所有现有命令在远程模式下正常工作 | 通过环境变量切换，无需修改 agent 工作流 |
+| 可视化看板 | Web UI 实时反映任务状态变更 | 拖拽看板 + 依赖图 + 执行记录 |
+| 并发安全 | ≥3 个 agent 同时领取不同任务不冲突 | 乐观锁保证认领原子性 |
 
 ## Scope
 
 ### In Scope
 
-- Go 后端 REST API 服务（双路由：`/api/agent/` 面向 AI，`/api/` 面向 Web UI）
-- Vue3 Web UI（任务看板、任务树、执行记录）
-- task-cli 远程模式扩展（环境变量切换本地/远程模式）
-- 多项目管理
-- SQLite（本地开发）+ PostgreSQL（生产）双存储适配
-- 扩展数据模型（Project → Feature → Task 三层结构）
-- index.json 导入接口
-- 任务内容（TaskContent）和 Feature 附件（FeatureAttachment）以 BLOB 存储，单文件限制 50MB
-- `task get-content` 子命令
+- [ ] Go 后端 REST API 服务（双路由：`/api/agent/` 面向 AI，`/api/` 面向 Web UI）
+- [ ] Vue3 Web UI（任务看板、任务依赖图、执行记录时间线）
+- [ ] task-cli 远程模式扩展（环境变量切换本地/远程模式）
+- [ ] 多项目管理（Project → Feature → Task 三层结构）
+- [ ] SQLite（本地开发）+ PostgreSQL（生产）双存储适配
+- [ ] index.json 导入接口（批量创建任务）
+- [ ] 任务内容（TaskContent）和 Feature 附件（FeatureAttachment）以 BLOB 存储
+- [ ] `task get-content` 子命令
+- [ ] `task feature push/pull` 文件同步命令
 
-### Out of Scope（V1 不做）
+### Out of Scope
 
 - 认证/授权（API Key、用户系统等，后续迭代统一规划）
 - 实时通知（WebSocket）
@@ -51,377 +56,384 @@
 - 任务自动调度算法
 - MCP Server 模式
 
-## Non-Functional Requirements
+## 流程说明
 
-| 类别 | 要求 |
+### 业务流程说明
+
+#### 任务生命周期
+
+任务从创建到完成经历以下状态流转：
+
+1. **创建**：通过 `index.json` 导入或 Web UI 手动创建，初始状态为 `pending`
+2. **认领**：Agent 通过 `task claim` 认领任务，状态变为 `in_progress`，记录 `agent_id` 和 `started_at`
+3. **执行与记录**：Agent 完成工作后通过 `task record` 提交执行记录
+4. **完成**：任务状态变为 `completed`，记录 `completed_at`
+
+**关键决策点**：
+- 认领时检查：任务是否为 `pending` 且所有依赖任务是否已完成 → 不满足则返回无可认领任务
+- 并发认领：多个 Agent 同时认领同一任务时，通过乐观锁（version 字段）保证只有一个成功
+- 状态回退：支持 `blocked` 状态，表示任务被阻塞无法继续
+
+#### Agent 执行流程
+
+1. Agent 设置环境变量 `TASK_REMOTE_URL`、`TASK_PROJECT_KEY`、`TASK_FEATURE_KEY`
+2. 执行 `task claim` → 调用 `/api/agent/features/{key}/tasks/next` 获取下一个可认领任务
+3. 如有可用任务，调用 `POST /api/agent/tasks/{key}/claim` 认领
+4. 执行 `task get-content <task-key>` 获取任务详细内容
+5. 执行任务（编码、测试等）
+6. 执行 `task record` 提交执行记录，任务状态更新为 `completed`
+
+#### Feature 同步流程
+
+- **Push**：`task feature push` 将本地 `design.md` 等文件上传为 Feature 附件
+- **Pull**：`task feature pull` 从服务端下载附件到本地对应目录
+- 同步基于 Feature key 定位，支持文件覆盖更新
+
+### 业务流程图
+
+#### 任务生命周期
+
+```mermaid
+flowchart TD
+    Start([创建任务]) --> Pending[pending]
+    Pending --> ClaimCheck{依赖任务<br/>是否全部完成?}
+    ClaimCheck -->|是| Claim[Agent 认领<br/>in_progress]
+    ClaimCheck -->|否| Blocked[blocked]
+    Blocked --> DepCheck{依赖解除?}
+    DepCheck -->|是| Pending
+    DepCheck -->|否| Blocked
+    Claim --> Record[提交执行记录]
+    Record --> Completed[completed]
+    Claim --> |阻塞| Blocked
+
+    style Pending fill:#9ca3af,color:#fff
+    style Claim fill:#3b82f6,color:#fff
+    style Completed fill:#22c55e,color:#fff
+    style Blocked fill:#ef4444,color:#fff
+```
+
+#### Agent 执行流程
+
+```mermaid
+flowchart TD
+    Start([Agent 启动]) --> Setup[设置环境变量<br/>TASK_REMOTE_URL<br/>TASK_PROJECT_KEY<br/>TASK_FEATURE_KEY]
+    Setup --> ClaimTask[task claim]
+    ClaimTask --> HasTask{有可认领任务?}
+    HasTask -->|是| GetContent[task get-content<br/>获取任务详情]
+    HasTask -->|否| Done([无可用任务，退出])
+    GetContent --> Execute[执行任务<br/>编码/测试]
+    Execute --> SubmitRecord[task record<br/>提交执行记录]
+    SubmitRecord --> Completed([任务完成])
+```
+
+#### 数据流
+
+| 数据流编号 | 源系统 | 目标系统 | 数据内容 | 传输方式 | 频率 | 格式 | 备注 |
+|-----------|--------|----------|----------|----------|------|------|------|
+| DF001 | task-cli | Agent API | 任务认领请求 | REST API | 按需 | JSON | 含 agent_id |
+| DF002 | Agent API | task-cli | 任务详情、内容 | REST API | 按需 | JSON | task key URL encode |
+| DF003 | task-cli | Agent API | 执行记录 | REST API | 每次任务完成 | JSON | 含 summary、files、tests |
+| DF004 | Web UI | Web API | CRUD 操作 | REST API | 用户操作 | JSON | ID 寻址 |
+| DF005 | task-cli | Agent API | Feature 文件同步 | REST API | 按需 | multipart/BLOB | push/pull |
+| DF006 | index.json | Agent API | 批量任务导入 | REST API | 初始化时 | JSON | 自动关联 Feature |
+
+## 功能描述
+
+### 5.1 列表页
+
+#### 5.1.1 项目列表
+
+**数据来源**：数据库 Project 表
+
+**显示范围**：所有项目
+
+**数据权限**：无权限区分（V1 不做认证）
+
+**排序方式**：按更新时间倒序（最近更新在前）
+
+**翻页设置**：每页 20 条
+
+**页面类型**：列表页
+
+**示例数据**：
+
+| Key | 名称 | 描述 | Feature 数 | 任务完成率 | 更新时间 |
+|-----|------|------|-----------|-----------|---------|
+| agent-task-center | Agent Task Center | 集中化任务管理服务 | 4 | 60% | 2026-04-08 10:30 |
+| data-pipeline | Data Pipeline | 数据处理流水线 | 2 | 30% | 2026-04-07 15:00 |
+
+**列表字段**：
+
+| 字段名称 | 类型 | 说明 |
+|---------|------|------|
+| key | string | 项目唯一标识（slug） |
+| name | string | 项目名称 |
+| description | string | 项目描述 |
+| feature_count | number | 关联 Feature 数量（计算字段） |
+| task_completion_rate | number | 任务完成率（计算字段，百分比） |
+| updated_at | datetime | 最后更新时间 |
+
+**搜索条件**：
+
+| 序号 | 搜索项 | 控件类型 | 说明 | 默认提示 |
+|------|--------|----------|------|----------|
+| 1 | 名称/Key | 输入框 | 模糊搜索 | 搜索项目名称或 Key |
+
+#### 5.1.2 Feature 列表
+
+**数据来源**：数据库 Feature 表，按 Project 筛选
+
+**显示范围**：当前项目下的所有 Feature
+
+**排序方式**：按 Key 中的序号排序（feat-1、feat-2...）
+
+**翻页设置**：不分页（单个项目 Feature 数量有限）
+
+**页面类型**：列表页
+
+**示例数据**：
+
+| Key | 名称 | 状态 | 任务数 | 完成数 | 更新时间 |
+|-----|------|------|--------|--------|---------|
+| feat-1-project-management | 项目管理 | completed | 8 | 8 | 2026-04-08 09:00 |
+| feat-2-task-execution | 任务执行 | in_progress | 12 | 5 | 2026-04-08 10:30 |
+
+**列表字段**：
+
+| 字段名称 | 类型 | 说明 |
+|---------|------|------|
+| key | string | Feature 唯一标识（格式 `feat-{N}-{slug}`） |
+| name | string | Feature 名称 |
+| status | string | pending / in_progress / completed |
+| task_count | number | 关联任务总数（计算字段） |
+| completed_count | number | 已完成任务数（计算字段） |
+| updated_at | datetime | 最后更新时间 |
+
+**状态说明**：
+
+| 状态值 | 显示文本 | 业务含义 |
+|--------|----------|----------|
+| pending | 待开始 | Feature 已创建，尚未开始执行 |
+| in_progress | 进行中 | Feature 下有任务正在执行 |
+| completed | 已完成 | Feature 下所有任务均已完成 |
+
+#### 5.1.3 任务看板
+
+**数据来源**：数据库 Task 表，按 Feature 筛选
+
+**显示范围**：当前 Feature 下的所有任务
+
+**页面类型**：仪表盘（Kanban 看板）
+
+**状态列**：
+
+| 状态值 | 显示文本 | 业务含义 |
+|--------|----------|----------|
+| pending | 待处理 | 任务等待认领 |
+| in_progress | 进行中 | 已被 Agent 认领，正在执行 |
+| completed | 已完成 | 任务已完成 |
+| blocked | 已阻塞 | 任务因依赖或异常被阻塞 |
+
+**卡片字段**（每张 TaskCard）：
+
+| 字段名称 | 类型 | 说明 |
+|---------|------|------|
+| task_id | string | 短 ID（如 "1.1"），Feature 内唯一 |
+| title | string | 任务标题 |
+| priority | string | 优先级 badge（P0 红色 / P1 橙色 / P2 灰色） |
+| agent_id | string | 认领的 Agent 标识（如有） |
+| dependency_count | number | 依赖任务数量 |
+
+**筛选条件**（FilterBar 组件）：
+
+| 序号 | 搜索项 | 控件类型 | 说明 | 默认提示 |
+|------|--------|----------|------|----------|
+| 1 | 优先级 | 下拉多选 | P0 / P1 / P2 | 选择优先级 |
+| 2 | 标签 | 下拉多选 | 从已有标签中选择 | 选择标签 |
+| 3 | 状态 | 下拉多选 | pending / in_progress / completed / blocked | 选择状态 |
+
+> 筛选条件序列化到 URL query params（如 `?priority=P0&tag=backend`），刷新后保留，支持分享链接。
+
+#### 5.1.4 Agent 列表
+
+**数据来源**：从 Task 表中聚合 `agent_id` 及其活动状态
+
+**显示范围**：所有出现过 agent_id 的 Agent
+
+**页面类型**：列表页
+
+**列表字段**：
+
+| 字段名称 | 类型 | 说明 |
+|---------|------|------|
+| agent_id | string | Agent 标识 |
+| active_tasks | number | 当前进行中的任务数 |
+| completed_tasks | number | 已完成的任务数 |
+| last_activity | datetime | 最近一次活动时间 |
+
+### 5.2 按钮操作
+
+#### 项目列表页按钮
+
+| 序号 | 按钮名称 | 操作描述 | 确认提示 |
+|------|----------|----------|----------|
+| 1 | 新建项目 | 打开创建项目表单 | 无 |
+| 2 | 删除项目 | 级联删除项目及其下所有 Feature、Task | 确认要删除项目 "{name}" 及其所有 Feature 和 Task 吗？ |
+
+#### Feature 列表页按钮
+
+| 序号 | 按钮名称 | 操作描述 | 确认提示 |
+|------|----------|----------|----------|
+| 1 | 新建 Feature | 打开创建 Feature 表单 | 无 |
+| 2 | 上传附件 | 打开文件选择器，上传附件到 Feature | 无 |
+| 3 | 删除 Feature | 删除 Feature 及其下所有 Task | 确认要删除 Feature "{name}" 及其所有任务吗？ |
+
+#### 任务看板按钮
+
+| 序号 | 按钮名称 | 操作描述 | 确认提示 |
+|------|----------|----------|----------|
+| 1 | 拖拽卡片 | 拖拽任务卡片到不同状态列，调用 `PUT /api/tasks/:id/status` 更新状态 | 无 |
+| 2 | 导入任务 | 上传 `index.json` 文件批量创建任务 | 无 |
+| 3 | 查看详情 | 点击任务卡片跳转到任务详情页 | 无 |
+
+#### 任务详情页按钮
+
+| 序号 | 按钮名称 | 操作描述 | 确认提示 |
+|------|----------|----------|----------|
+| 1 | 编辑内容 | 编辑任务的 Markdown 详细内容 | 无 |
+| 2 | 更新状态 | 手动变更任务状态 | 无 |
+| 3 | 删除任务 | 删除当前任务 | 确认要删除任务 "{title}" 吗？ |
+
+### 5.3 新增/编辑表单
+
+#### 创建项目
+
+| 字段名称 | 控件类型 | 必填 | 字符长度 | 规则说明 |
+|---------|----------|------|----------|----------|
+| Key | 单行文本 | 是 | 3-64 | 小写字母、数字、短横线，全局唯一 slug |
+| 名称 | 单行文本 | 是 | 1-128 | 项目显示名称 |
+| 描述 | 多行文本 | 否 | 0-1024 | 项目描述 |
+
+#### 创建 Feature
+
+| 字段名称 | 控件类型 | 必填 | 字符长度 | 规则说明 |
+|---------|----------|------|----------|----------|
+| Key | 单行文本 | 是 | 3-128 | 格式 `feat-{N}-{slug}`，项目内唯一 |
+| 名称 | 单行文本 | 是 | 1-128 | Feature 显示名称 |
+| 描述 | 多行文本 | 否 | 0-1024 | Feature 描述 |
+
+#### 导入任务（index.json）
+
+| 字段名称 | 控件类型 | 必填 | 字符长度 | 规则说明 |
+|---------|----------|------|----------|----------|
+| index.json | 文件上传 | 是 | — | JSON 格式，自动解析为 Task 列表并关联当前 Feature |
+
+#### 上传附件
+
+| 字段名称 | 控件类型 | 必填 | 字符长度 | 规则说明 |
+|---------|----------|------|----------|----------|
+| 文件 | 文件选择器 | 是 | 单文件 ≤50MB | 支持 .md、.html、.pen、图片等任意类型 |
+
+### 5.4 关联性需求改动
+
+| 序号 | 涉及项目 | 功能模块 | 关联改动点 | 更改后逻辑说明 |
+|------|----------|----------|------------|----------------|
+| 1 | task-cli | 命令模式 | 新增远程模式 | 设置 `TASK_REMOTE_URL` 后，claim/record/status/query 等命令走 Agent API，未设置时保持本地文件行为 |
+| 2 | task-cli | get-content | 新增子命令 | `task get-content <task-key>` 获取任务详细内容（本地模式读本地文件，远程模式调 Agent API） |
+| 3 | task-cli | feature push/pull | 新增子命令 | `task feature push` 将本地文件上传为 Feature 附件，`task feature pull` 将附件下载到本地 |
+| 4 | task-cli | 环境变量 | 新增配置项 | `TASK_REMOTE_URL`（远程地址）、`TASK_PROJECT_KEY`（项目 key）、`TASK_FEATURE_KEY`（Feature key） |
+
+### 5.5 Agent API
+
+面向 AI Agent 和 task-cli 的 API，使用语义化 Key 寻址。
+
+> 具体端点定义和请求/响应格式见 `design.md`。
+
+**核心接口**：
+
+| 接口 | 说明 |
 |------|------|
-| 并发安全 | 任务认领使用乐观锁（version 字段），同一任务并发认领时只有一个成功，其余返回 409 |
-| API 响应时间 | 列表接口 P99 < 500ms，单任务操作 P99 < 200ms（本地 SQLite 环境） |
-| 文件大小限制 | 单个附件/任务内容上传不超过 50MB，超出返回 413 |
-| 存储兼容性 | 同一套代码通过配置切换 SQLite（开发）和 PostgreSQL（生产），无需修改业务逻辑 |
-| 可观测性 | 所有 API 请求记录结构化日志（method、path、status、latency） |
-| AI 友好错误信息 | 所有错误响应包含机器可读的 `code` 字段和人类可读的 `message` 字段，`code` 使用语义化字符串（如 `task.already_claimed`、`feature.not_found`），不使用数字错误码 |
+| 获取项目详情 | 按 project key 查询 |
+| 获取 Feature 列表 | 按 project key 查询 |
+| 获取 Feature 详情 | 按 feature key 查询 |
+| 附件上传/下载 | 按 feature key + filename 操作 |
+| 获取任务列表 | 按 feature key 查询，含依赖状态 |
+| 获取下一个可认领任务 | 返回第一个 pending 且依赖全部完成的任务 |
+| 导入 index.json | 批量创建任务并自动关联 Feature |
+| 认领任务 | 设置 agent_id，状态变为 in_progress（乐观锁） |
+| 更新任务状态 | pending/in_progress/completed/blocked |
+| 获取任务内容 | 返回 Markdown 格式的任务详情 |
+| 提交执行记录 | 含 summary、files、tests、coverage 等 |
 
-**错误响应格式示例：**
+**错误响应规范**：
 
-```json
-{
-  "code": "task.already_claimed",
-  "message": "Task 'feat-1-project-management/1.1' is already claimed by agent 'claude-agent-01'. Use /api/agent/tasks/feat-1-project-management%2F1.1/status to update its status.",
-  "task_key": "feat-1-project-management/1.1",
-  "claimed_by": "claude-agent-01"
-}
-```
+所有错误响应使用语义化 `code`（如 `task.already_claimed`、`feature.not_found`），`message` 包含足够上下文让 Agent 无需查阅文档即可理解原因并采取下一步行动。
 
-错误 `message` 应包含足够上下文，让 agent 无需查阅文档即可理解原因并采取下一步行动。
+| HTTP 状态码 | 场景 | 错误码示例 |
+|-------------|------|-----------|
+| 400 | 参数错误 | `request.invalid` |
+| 404 | 资源不存在 | `feature.not_found` |
+| 409 | 并发冲突 | `task.already_claimed` |
+| 409 | 无可认领任务 | `task.none_claimable` |
+| 413 | 文件超过 50MB | `file.too_large` |
+| 500 | 服务内部错误 | `server.internal_error` |
 
----
+### 5.6 任务依赖图
 
-## 本地目录结构
+Feature 详情页内的可视化组件，使用 D3.js 渲染任务依赖关系有向无环图（DAG）。
 
-每个 Feature 在本地对应一个独立目录，通过 `task feature push/pull` 与服务端同步：
+- **节点**：任务卡片，显示 task_id、title，颜色反映状态（pending=灰、in_progress=蓝、completed=绿、blocked=红）
+- **边**：依赖关系箭头，方向为被依赖任务 → 依赖方任务
+- **交互**：点击节点跳转到 `/tasks/:id`
 
-```
-docs/features/<project-slug>/
-├── feat-1-project-management/
-│   ├── design.md                   # 技术方案（可 push 到服务端）
-│   ├── ui/                         # UI 设计稿
-│   │   └── mockup.pen
-│   ├── tasks/
-│   │   └── index.json
-│   └── records/
-│
-├── feat-2-task-execution/
-│   ├── design.md
-│   ├── tasks/
-│   └── records/
-│
-└── feat-N-.../
-```
+### 5.7 执行记录时间线
 
-## 数据模型
+任务详情页内的组件，按时间倒序展示执行记录。
 
-层级结构：**Project → Feature → Task**
-
-### Key 设计原则
-
-所有实体同时拥有**自增整型 ID**（数据库主键，用于外键关联）和**语义化 key**（业务标识符，用于 API 和 CLI）：
-
-| 实体 | Key 格式 | 示例 |
-|------|---------|------|
-| Project | 用户指定的 slug | `agent-task-center` |
-| Feature | `feat-{N}-{slug}` | `feat-1-project-management` |
-| Task | `{feature_key}/{task_id}` | `feat-1-project-management/1.1` |
-| FeatureAttachment | `{feature_key}/attachments/{filename}` | `feat-1-project-management/attachments/design.md` |
-| ExecutionRecord | `{task_key}/records/{timestamp}` | `feat-1-project-management/1.1/records/20260408T103000` |
-
-- **ID**：自增整型，数据库内部外键关联使用，不暴露给外部 API
-- **Key**：全局唯一语义字符串，用于所有 API 路径和 CLI 参数，agent 可直接构造无需先查询
-
-```go
-type Project struct {
-    ID          int64     `json:"-"`            // 数据库主键，不暴露
-    Key         string    `json:"key"`          // slug，如 "agent-task-center"
-    Name        string    `json:"name"`
-    Description string    `json:"description"`
-    CreatedAt   time.Time `json:"created_at"`
-    UpdatedAt   time.Time `json:"updated_at"`
-}
-
-type Feature struct {
-    ID         int64     `json:"-"`            // 数据库主键，不暴露
-    Key        string    `json:"key"`          // 如 "feat-1-project-management"
-    ProjectID  int64     `json:"-"`            // 外键，不暴露
-    ProjectKey string    `json:"project_key"`
-    Name       string    `json:"name"`
-    Description string   `json:"description"`
-    Status     string    `json:"status"`       // pending/in_progress/completed
-    CreatedAt  time.Time `json:"created_at"`
-    UpdatedAt  time.Time `json:"updated_at"`
-}
-
-// FeatureAttachment 统一管理 Feature 关联的所有文件，内容以 BLOB 存储（SQLite: BLOB，PostgreSQL: BYTEA）
-type FeatureAttachment struct {
-    ID          int64     `json:"-"`            // 数据库主键，不暴露
-    Key         string    `json:"key"`          // 如 "feat-1-project-management/attachments/design.md"
-    FeatureID   int64     `json:"-"`            // 外键，不暴露
-    FeatureKey  string    `json:"feature_key"`
-    Name        string    `json:"name"`         // 文件名，如 "design.md", "mockup.pen"
-    ContentType string    `json:"content_type"` // MIME 类型
-    Data        []byte    `json:"-"`            // 二进制内容，不序列化到 JSON
-    FileSize    int64     `json:"file_size"`
-    CreatedAt   time.Time `json:"created_at"`
-    UpdatedAt   time.Time `json:"updated_at"`
-}
-
-type Task struct {
-    ID            int64      `json:"-"`            // 数据库主键，不暴露
-    Key           string     `json:"key"`          // 如 "feat-1-project-management/1.1"
-    TaskID        string     `json:"task_id"`      // 短 ID，如 "1.1"，在 Feature 内唯一
-    Title         string     `json:"title"`
-    Priority      string     `json:"priority"`     // P0/P1/P2
-    Status        string     `json:"status"`       // pending/in_progress/completed/blocked
-    Dependencies  []string   `json:"dependencies"` // 依赖的 task key 列表
-    ProjectID     int64      `json:"-"`            // 外键，不暴露
-    ProjectKey    string     `json:"project_key"`
-    FeatureID     int64      `json:"-"`            // 外键，不暴露
-    FeatureKey    string     `json:"feature_key"`
-    AgentID       *string    `json:"agent_id,omitempty"`
-    Tags          []string   `json:"tags,omitempty"`
-    EstimatedTime string     `json:"estimated_time,omitempty"`
-    CreatedAt     time.Time  `json:"created_at"`
-    UpdatedAt     time.Time  `json:"updated_at"`
-    StartedAt     *time.Time `json:"started_at,omitempty"`
-    CompletedAt   *time.Time `json:"completed_at,omitempty"`
-}
-
-// TaskContent 以 BLOB 存储任务详细内容（SQLite: BLOB，PostgreSQL: BYTEA）
-type TaskContent struct {
-    ID          int64     `json:"-"`            // 数据库主键，不暴露
-    TaskID      int64     `json:"-"`            // 外键，不暴露
-    TaskKey     string    `json:"task_key"`
-    ContentType string    `json:"content_type"` // 通常为 text/markdown
-    Data        []byte    `json:"-"`            // 二进制内容，不序列化到 JSON
-    FileSize    int64     `json:"file_size"`
-    CreatedAt   time.Time `json:"created_at"`
-    UpdatedAt   time.Time `json:"updated_at"`
-}
-
-type ExecutionRecord struct {
-    ID                 int64                 `json:"-"`        // 数据库主键，不暴露
-    Key                string                `json:"key"`      // 如 "feat-1-project-management/1.1/records/20260408T103000"
-    TaskID             int64                 `json:"-"`        // 外键，不暴露
-    TaskKey            string                `json:"task_key"`
-    AgentID            string                `json:"agent_id"`
-    Status             string                `json:"status"`
-    Summary            string                `json:"summary"`
-    FilesCreated       []string              `json:"files_created,omitempty"`
-    FilesModified      []string              `json:"files_modified,omitempty"`
-    KeyDecisions       []string              `json:"key_decisions,omitempty"`
-    TestsPassed        int                   `json:"tests_passed"`
-    TestsFailed        int                   `json:"tests_failed"`
-    Coverage           float64               `json:"coverage"`
-    AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria,omitempty"`
-    CreatedAt          time.Time             `json:"created_at"`
-}
-
-type AcceptanceCriterion struct {
-    Criterion string `json:"criterion"`
-    Met       bool   `json:"met"`
-}
-```
-
-## User Stories
-
-### 开发者/管理者
-
-**US-1**: As a developer, I want to view all tasks across multiple projects in one dashboard, so that I can monitor overall progress without switching between local directories.
-
-**US-2**: As a developer, I want to filter tasks by project, feature, priority, and tag, so that I can focus on what's relevant to me at any given time.
-
-**US-3**: As a developer, I want to view the execution history of a task (summary, files changed, test results), so that I can review what an agent did and audit its work.
-
-**US-4**: As a developer, I want to create projects and features via the Web UI, so that I can organize tasks before handing them off to agents.
-
-**US-5**: As a developer, I want to upload design documents and attachments to a feature, so that agents can access the latest specs without manual file sharing.
-
-### AI Agent
-
-**US-6**: As an AI agent, I want to claim the next available task with a single CLI command, so that I can start working without learning new tools or changing my existing workflow.
-
-**US-7**: As an AI agent, I want to submit an execution record after completing a task, so that the task center reflects my work and other agents know the task is done.
-
-**US-8**: As an AI agent, I want to fetch task content (Markdown) via CLI, so that I can read the full task specification before starting work.
-
----
-
-## Features
-
-### Feature 1: 项目管理 `P0`
-
-管理 Project 和 Feature 的生命周期，为任务提供组织结构。
-
-**Agent API** (`/api/agent/`) — key 寻址，供 task-cli 和 AI agent 调用
-
-| API | Method | Description |
-|-----|--------|-------------|
-| `/api/agent/projects/{key}` | GET | 项目详情 |
-| `/api/agent/projects/{key}/features` | GET | Feature 列表 |
-| `/api/agent/features/{key}` | GET | Feature 详情 |
-| `/api/agent/features/{key}/attachments` | GET | 附件列表 |
-| `/api/agent/features/{key}/attachments/{name}` | GET | 下载附件内容 |
-| `/api/agent/features/{key}/attachments/{name}` | PUT | 上传/替换附件（`task feature push`） |
-
-**Web UI API** (`/api/`) — ID 寻址，供 Vue3 前端调用
-
-| API | Method | Description |
-|-----|--------|-------------|
-| `/api/projects` | GET | 项目列表 |
-| `/api/projects` | POST | 创建项目 |
-| `/api/projects/{id}` | GET | 项目详情 |
-| `/api/projects/{id}` | PUT | 更新项目 |
-| `/api/projects/{id}` | DELETE | 删除项目（级联） |
-| `/api/projects/{id}/features` | GET | Feature 列表 |
-| `/api/projects/{id}/features` | POST | 创建 Feature |
-| `/api/features/{id}` | GET | Feature 详情 |
-| `/api/features/{id}` | PUT | 更新 Feature |
-| `/api/features/{id}` | DELETE | 删除 Feature |
-| `/api/features/{id}/attachments` | GET | 附件列表 |
-| `/api/features/{id}/attachments` | POST | 上传附件（multipart/form-data） |
-| `/api/features/{id}/attachments/{aid}` | GET | 下载附件 |
-| `/api/features/{id}/attachments/{aid}` | PUT | 替换附件 |
-| `/api/features/{id}/attachments/{aid}` | DELETE | 删除附件 |
-
-**Acceptance Criteria**
-
-- [ ] 创建项目，返回项目 key
-- [ ] 查看项目列表
-- [ ] 删除项目（级联删除其下 Feature 和 Task）
-- [ ] 在项目下创建 Feature
-- [ ] 查看项目下的 Feature 列表
-- [ ] 更新/删除 Feature
-- [ ] 通过 multipart 上传任意类型附件（.md、.html、.pen、图片等）
-- [ ] 下载/替换/删除附件
-- [ ] `task feature push` 将本地文件上传为附件
-- [ ] `task feature pull` 将附件下载到本地对应目录
-
----
-
-### Feature 2: 任务执行 `P0`
-
-Agent 领取和执行任务的核心流程，包括任务 CRUD、状态流转、执行记录。
-
-**Agent API** (`/api/agent/`) — key 寻址，供 task-cli 和 AI agent 调用
-
-| API | Method | Description |
-|-----|--------|-------------|
-| `/api/agent/features/{key}/tasks` | GET | 任务列表（含依赖状态） |
-| `/api/agent/features/{key}/tasks/next` | GET | 获取下一个可认领任务（pending 且依赖已全部完成） |
-| `/api/agent/features/{key}/import` | POST | 导入 index.json 批量创建任务 |
-| `/api/agent/tasks/{key}` | GET | 任务详情 |
-| `/api/agent/tasks/{key}/content` | GET | 获取任务内容（Markdown） |
-| `/api/agent/tasks/{key}/claim` | POST | 认领任务 |
-| `/api/agent/tasks/{key}/status` | PUT | 更新任务状态 |
-| `/api/agent/tasks/{key}/records` | POST | 提交执行记录 |
-
-**Web UI API** (`/api/`) — ID 寻址，供 Vue3 前端调用
-
-| API | Method | Description |
-|-----|--------|-------------|
-| `/api/features/{id}/tasks` | GET | 任务列表 |
-| `/api/features/{id}/tasks` | POST | 创建任务 |
-| `/api/tasks/{id}` | GET | 任务详情 |
-| `/api/tasks/{id}` | PUT | 更新任务（标题、优先级、标签等） |
-| `/api/tasks/{id}` | DELETE | 删除任务 |
-| `/api/tasks/{id}/content` | GET | 获取任务内容 |
-| `/api/tasks/{id}/content` | PUT | 更新任务内容 |
-| `/api/tasks/{id}/status` | PUT | 更新任务状态（看板拖拽） |
-| `/api/tasks/{id}/records` | GET | 执行记录列表 |
-| `/api/agents` | GET | Agent 列表及活动状态 |
-
-**Acceptance Criteria**
-
-- [ ] 在 Feature 下创建任务
-- [ ] 查看 Feature 下的任务列表
-- [ ] 更新任务内容（标题、描述、优先级、标签等）
-- [ ] 删除任务
-- [ ] 导入 index.json 文件批量创建任务（自动关联 Feature）
-- [ ] 创建/更新任务的详细内容（Markdown）
-- [ ] 认领任务（设置 agent_id，状态变为 in_progress）
-- [ ] 更新任务状态（pending/in_progress/completed/blocked）
-- [ ] 并发认领不冲突（同一任务只能被一个 agent 认领）
-- [ ] 创建执行记录（包含 summary、files、tests、coverage 等）
-- [ ] 查看任务的执行历史
-
----
-
-### Feature 3: 可视化看板 `P1`
-
-Web UI，直观展示任务状态、依赖关系和执行进度。
-
-**页面与组件清单**
-
-| 页面/组件 | 路由/位置 | 职责 |
-|-----------|-----------|------|
-| `ProjectList.vue` | `/projects` | 项目列表入口 |
-| `ProjectDetail.vue` | `/projects/:id` | Feature 列表 |
-| `FeatureDetail.vue` | `/features/:id` | 看板 + 依赖图 + 附件 |
-| `TaskDetail.vue` | `/tasks/:id` | 任务详情 + 执行记录 |
-| `TaskBoard.vue` | FeatureDetail 子组件 | Kanban 看板，四列状态 |
-| `TaskDependencyGraph.vue` | FeatureDetail 子组件 | D3.js 有向图 |
-| `FilterBar.vue` | FeatureDetail 子组件 | 筛选条件栏 |
-| `RecordTimeline.vue` | TaskDetail 子组件 | 执行记录时间线 |
-| `TaskCard.vue` | TaskBoard 子组件 | 单个任务卡片 |
-
-**功能描述**
-
-**任务看板（TaskBoard）**
-- 四列：待处理 / 进行中 / 已完成 / 已阻塞
-- 使用 `vue-draggable-plus`（基于 SortableJS）支持拖拽变更状态
-- 拖拽结束调用 `PUT /api/tasks/:id/status`
-- 每张卡片显示：任务 ID、标题、优先级 badge、agent_id（如有）、依赖数量
-
-**筛选栏（FilterBar）**
-- 筛选维度：Project / Feature / 优先级（P0/P1/P2）/ 标签（多选）/ 状态
-- 筛选条件序列化为 URL query params（如 `?priority=P0&tag=backend`），刷新后保留，支持分享链接
-- Pinia `filterStore` 负责从 URL 初始化状态、同步写回 URL
-
-**任务依赖图（TaskDependencyGraph）**
-- 使用 D3.js 渲染 Feature 内任务的有向无环图（DAG）
-- 节点：任务卡片（显示 task_id、title、status 颜色编码）
-- 边：依赖关系箭头，方向为 "被依赖任务 → 依赖方任务"
-- 节点颜色：pending=灰、in_progress=蓝、completed=绿、blocked=红
-- 点击节点跳转到 `/tasks/:id`
-- 图数据来源：`GET /api/features/:id/tasks` 返回的 `dependencies` 字段
-
-**执行记录时间线（RecordTimeline）**
-- 垂直时间线，每条记录显示：时间戳、agent_id、状态、summary
+- 每条记录显示：时间戳、agent_id、状态、summary
 - 展开后显示：修改文件列表、关键决策、测试通过/失败数、覆盖率
-- 数据来源：`GET /api/tasks/:id/records`
+- 数据来源：Agent 通过 `task record` 提交的执行记录
 
-**Pinia Store 扩展**
+## 其他说明
 
-| Store | 新增状态 | 说明 |
-|-------|----------|------|
-| `filterStore` | `project`, `feature`, `priority[]`, `tags[]`, `status[]` | 筛选条件，与 URL query params 双向同步 |
-| `task.ts` | 现有 | 看板操作调用 `PUT /api/tasks/:id/status` |
+### 性能需求
 
-**Acceptance Criteria**
+- 响应时间：列表接口 P99 < 500ms，单任务操作 P99 < 200ms（本地 SQLite 环境）
+- 并发量：支持 ≥3 个 Agent 同时领取不同任务不冲突
+- 文件大小限制：单个附件/任务内容上传不超过 50MB，超出返回 413
+- 兼容性：现代浏览器（Chrome、Firefox、Edge 最新两个主版本）
 
-- [ ] 任务看板：按状态分四列显示，支持拖拽变更状态，拖拽后实时更新
-- [ ] 支持按 Project / Feature / 优先级 / 标签 / 状态筛选，筛选条件持久化到 URL query params
-- [ ] 刷新页面后筛选条件保留；筛选链接可分享
-- [ ] 任务依赖图：用 D3.js 渲染 Feature 内任务的 DAG，节点颜色反映任务状态
-- [ ] 点击依赖图节点跳转到任务详情页
-- [ ] 执行记录时间线：按时间倒序展示，支持展开查看详情（文件、决策、测试结果）
-- [ ] TaskCard 显示优先级 badge 和 agent_id
+### 数据需求
+
+- 数据埋点：所有 API 请求记录结构化日志（method、path、status、latency）
+- 数据初始化：支持通过 `index.json` 导入批量创建任务
+- 数据迁移：GORM AutoMigrate 启动时自动建表，生产环境可替换为 `golang-migrate`
+
+### 监控需求
+
+- 结构化日志使用 Go 标准库 `log/slog`，输出 JSON 格式
+- 所有请求记录 method、path、status、latency
+
+### 安全性需求
+
+- 传输加密：生产环境建议 HTTPS（V1 不强制）
+- 存储加密：无特殊加密需求（V1 不做认证）
+- 接口限制：V1 不做认证/授权，后续迭代统一规划
 
 ---
 
-### Feature 4: task-cli 远程模式 `P1`
+## 质量检查
 
-扩展 task-cli，通过环境变量切换本地/远程模式，Agent 零学习成本接入。
-
-**环境变量**
-
-| 环境变量 | 示例值 | 说明 |
-|---------|--------|------|
-| `TASK_REMOTE_URL` | `http://localhost:8080` | 远程服务地址 |
-| `TASK_PROJECT_KEY` | `agent-task-center` | 当前项目 key |
-| `TASK_FEATURE_KEY` | `feat-1-project-management` | 当前 Feature key |
-
-当 `TASK_REMOTE_URL` 设置时，task-cli 切换到远程模式，所有命令通过 HTTP 调用而非本地文件。未设置时保持现有本地文件行为。
-
-新增子命令：
-- `task get-content <task-key>`: 获取任务详细内容（本地模式读取本地文件，远程模式调用 Agent API）
-- `task feature push [feature-key]`: 将本地 `design.md` 推送到服务端
-- `task feature pull [feature-key]`: 从服务端拉取文档内容到本地 `design.md`
-
-**Acceptance Criteria**
-
-- [ ] 设置 `TASK_REMOTE_URL` 后，claim/record/status/query 等命令走 Agent API (`/api/agent/`)
-- [ ] 未设置时保持现有本地文件行为
-- [ ] 新增 `task get-content <task-key>` 子命令
-- [ ] 支持通过 `TASK_FEATURE_KEY` 指定当前 Feature 上下文
-- [ ] `task feature push` 将本地 design.md 上传到服务端
-- [ ] `task feature pull` 将服务端内容写入本地 design.md
+- [x] 需求标题是否概括准确
+- [x] 需求背景是否包含原因、对象、人员三要素
+- [x] 需求目标是否量化
+- [x] 流程说明是否完整
+- [x] 业务流程图是否包含（Mermaid 格式）
+- [x] 列表页描述是否完整（数据来源/显示范围/权限/排序/翻页/字段/搜索）
+- [x] 按钮描述是否完整（权限/状态/校验/数据逻辑）
+- [x] 表单描述是否完整（字段/校验规则）
+- [x] 关联性需求是否全面分析
+- [x] 非功能性需求（性能/数据/监控/安全）是否考虑
+- [x] 所有表格是否填写完整
+- [x] 是否有歧义或模糊表述
+- [x] 是否可执行、可验收
