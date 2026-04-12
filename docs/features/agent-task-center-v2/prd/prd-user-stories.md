@@ -53,6 +53,8 @@ feature: "agent-task-center-v2"
 - When 开发者点击某个 Agent ID
 - Then 跳转到该 Agent 的执行历史轨迹页面
 - And 历史轨迹按时间倒序展示该 Agent 的所有执行记录
+- When 开发者在搜索框输入 Agent ID 关键词
+- Then 列表实时过滤，仅显示匹配的 Agent（防抖 300ms）
 
 ---
 
