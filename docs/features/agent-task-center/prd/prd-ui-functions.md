@@ -99,6 +99,10 @@ feature: "Agent Task Center"
 | Populated | 双 Tab 列表 | 数据加载完成 |
 | Empty Tab | 空状态提示 | 当前 Tab 无数据 |
 
+### Validation Rules
+
+- N/A — 只读列表页，无用户输入校验
+
 ---
 
 ## UI Function 3: 任务看板页
@@ -224,6 +228,10 @@ Markdown 渲染展示 Proposal 或 Feature 的文档内容。
 | Loading | 加载动画 | 进入页面 |
 | Populated | 渲染后的 Markdown + 关联列表 | 数据加载完成 |
 | Error | 错误提示 | 文档不存在或解析失败 |
+
+### Validation Rules
+
+- N/A — 只读展示页，无用户输入校验
 
 ---
 
