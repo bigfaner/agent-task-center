@@ -1,0 +1,33 @@
+{
+  "feature": "agent-task-center",
+  "prd": "prd/prd-spec.md",
+  "tasks": {
+    "1.1-init-monorepo-scaffold": {
+      "id": "1.1",
+      "title": "Init monorepo scaffold",
+      "priority": "P0",
+      "estimatedTime": "2h",
+      "dependencies": [],
+      "status": "completed",
+      "file": "1.1-init-monorepo-scaffold.md"
+    },
+    "1.2-config-and-db-connection": {
+      "id": "1.2",
+      "title": "Config & DB connection setup",
+      "priority": "P0",
+      "estimatedTime": "2h",
+      "dependencies": ["1.1"],
+      "status": "completed",
+      "file": "1.2-config-and-db-connection.md"
+    },
+    "2.3-file-parsers": {
+      "id": "2.3",
+      "title": "File parsers",
+      "estimatedTime": "3h",
+      "dependencies": ["2.2"],
+      "status": "in_progress",
+      "file": "2.3-file-parsers.md",
+      "tags": ["parser", "core"]
+    }
+  }
+}

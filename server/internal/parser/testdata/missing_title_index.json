@@ -1,0 +1,8 @@
+{
+  "feature": "test-feature",
+  "tasks": {
+    "bad-task": {
+      "task_id": "1.1"
+    }
+  }
+}
