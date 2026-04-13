@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS execution_records;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS features;
+DROP TABLE IF EXISTS proposals;
+DROP TABLE IF EXISTS projects;

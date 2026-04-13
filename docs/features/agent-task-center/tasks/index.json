@@ -32,7 +32,7 @@
       "dependencies": [
         "1.2"
       ],
-      "status": "pending",
+      "status": "completed",
       "file": "2.1-database-schema-and-migrations.md",
       "record": "records/2.1-database-schema-and-migrations.md"
     },
