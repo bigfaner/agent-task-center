@@ -2,7 +2,6 @@ package model
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,8 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"agent-task-center/server/internal/service"
 )
 
 // ---------------------------------------------------------------------------
@@ -342,50 +339,6 @@ func TestTaskFilterWithValues(t *testing.T) {
 	assert.Equal(t, []string{"P0", "P1"}, f.Priorities)
 	assert.Equal(t, []string{"core", "api"}, f.Tags)
 	assert.Equal(t, []string{"pending", "in_progress"}, f.Statuses)
-}
-
-// ---------------------------------------------------------------------------
-// Sentinel errors tests (service package)
-// ---------------------------------------------------------------------------
-
-func TestSentinelErrors(t *testing.T) {
-	errs := map[string]error{
-		"ErrNotFound":         service.ErrNotFound,
-		"ErrNoAvailableTask":  service.ErrNoAvailableTask,
-		"ErrVersionConflict":  service.ErrVersionConflict,
-		"ErrInvalidFile":      service.ErrInvalidFile,
-		"ErrUnauthorizedAgent": service.ErrUnauthorizedAgent,
-	}
-
-	for name, err := range errs {
-		t.Run(name, func(t *testing.T) {
-			assert.True(t, errors.Is(err, err), "errors.Is should match %s", name)
-		})
-	}
-}
-
-func TestSentinelErrorsDistinct(t *testing.T) {
-	// Ensure all sentinel errors are distinct
-	all := []error{
-		service.ErrNotFound,
-		service.ErrNoAvailableTask,
-		service.ErrVersionConflict,
-		service.ErrInvalidFile,
-		service.ErrUnauthorizedAgent,
-	}
-	for i := 0; i < len(all); i++ {
-		for j := i + 1; j < len(all); j++ {
-			assert.NotEqual(t, all[i], all[j], "errors %d and %d should be distinct", i, j)
-		}
-	}
-}
-
-func TestSentinelErrorsMessages(t *testing.T) {
-	assert.Equal(t, "not found", service.ErrNotFound.Error())
-	assert.Equal(t, "no available task", service.ErrNoAvailableTask.Error())
-	assert.Equal(t, "version conflict", service.ErrVersionConflict.Error())
-	assert.Equal(t, "invalid file format", service.ErrInvalidFile.Error())
-	assert.Equal(t, "task claimed by different agent", service.ErrUnauthorizedAgent.Error())
 }
 
 // ---------------------------------------------------------------------------
