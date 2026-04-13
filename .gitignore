@@ -32,3 +32,15 @@ go.work.sum
 # .vscode/
 .claude/settings.local.json
 *.DS_Store
+
+# Web build output (embedded via Go embed.FS)
+server/web/dist/
+
+# Web dependencies
+web/node_modules/
+
+# Go build output
+server/bin/
+
+# Task process state (not committed)
+docs/features/*/tasks/process/
