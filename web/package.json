@@ -38,6 +38,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^9.39.4",
     "jsdom": "^28.1.0",
     "prettier": "^3.8.2",
