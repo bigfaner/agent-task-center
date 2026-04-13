@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"agent-task-center/server/internal/db"
@@ -756,5 +758,634 @@ func TestFeatureService_GetTasks_TaskFieldsDeserialized(t *testing.T) {
 	}
 	if len(deps) != 1 || deps[0] != "0.1" {
 		t.Errorf("expected dependencies [0.1], got %v", deps)
+	}
+}
+
+// ===========================================================================
+// TaskService tests
+// ===========================================================================
+
+// seedTaskServiceTest creates a project + feature for TaskService tests.
+// Returns (projectID, featureID).
+func seedTaskServiceTest(t *testing.T, d *sqlx.DB) (int64, int64) {
+	t.Helper()
+	ctx := context.Background()
+
+	proj, err := db.GetOrCreateProject(ctx, d, "test-project")
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	f, err := db.UpsertFeature(ctx, d, proj.ID, model.FeatureInput{
+		Slug: "test-feature", Name: "Test Feature", Status: "in-progress", Content: "",
+	})
+	if err != nil {
+		t.Fatalf("create feature: %v", err)
+	}
+
+	return proj.ID, f.ID
+}
+
+// ---------------------------------------------------------------------------
+// TaskService.Get
+// ---------------------------------------------------------------------------
+
+func TestTaskService_Get_Found(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	task, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Test Task", Description: "desc", Priority: "P0",
+		Tags: []string{"core"}, Dependencies: []string{"0.1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	detail, err := svc.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if detail.ID != task.ID {
+		t.Errorf("expected ID %d, got %d", task.ID, detail.ID)
+	}
+	if detail.TaskID != "1.1" {
+		t.Errorf("expected taskId '1.1', got %q", detail.TaskID)
+	}
+	if detail.Title != "Test Task" {
+		t.Errorf("expected title 'Test Task', got %q", detail.Title)
+	}
+	if len(detail.Tags) != 1 || detail.Tags[0] != "core" {
+		t.Errorf("expected tags [core], got %v", detail.Tags)
+	}
+	if len(detail.Dependencies) != 1 || detail.Dependencies[0] != "0.1" {
+		t.Errorf("expected dependencies [0.1], got %v", detail.Dependencies)
+	}
+}
+
+func TestTaskService_Get_NotFound(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, err := svc.Get(ctx, 99999)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TaskService.GetByTaskID
+// ---------------------------------------------------------------------------
+
+func TestTaskService_GetByTaskID_Found(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	_, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "3.2", Title: "TaskService", Priority: "P0", Tags: []string{"service"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	detail, err := svc.GetByTaskID(ctx, "test-project", "test-feature", "3.2")
+	if err != nil {
+		t.Fatalf("GetByTaskID() error: %v", err)
+	}
+	if detail.TaskID != "3.2" {
+		t.Errorf("expected taskId '3.2', got %q", detail.TaskID)
+	}
+	if detail.Title != "TaskService" {
+		t.Errorf("expected title 'TaskService', got %q", detail.Title)
+	}
+	if len(detail.Tags) != 1 || detail.Tags[0] != "service" {
+		t.Errorf("expected tags [service], got %v", detail.Tags)
+	}
+}
+
+func TestTaskService_GetByTaskID_FeatureNotFound(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, err := db.GetOrCreateProject(ctx, d, "test-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.GetByTaskID(ctx, "test-project", "nonexistent", "1.1")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestTaskService_GetByTaskID_TaskNotFound(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	seedTaskServiceTest(t, d)
+
+	_, err := svc.GetByTaskID(ctx, "test-project", "test-feature", "9.9")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TaskService.Claim
+// ---------------------------------------------------------------------------
+
+func TestTaskService_Claim_Success(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	_, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task 1", Priority: "P0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := svc.Claim(ctx, "test-project", "test-feature", "agent-01")
+	if err != nil {
+		t.Fatalf("Claim() error: %v", err)
+	}
+	if task.Status != "in_progress" {
+		t.Errorf("expected status 'in_progress', got %q", task.Status)
+	}
+	if task.ClaimedBy != "agent-01" {
+		t.Errorf("expected claimed_by 'agent-01', got %q", task.ClaimedBy)
+	}
+	if task.Version != 1 {
+		t.Errorf("expected version 1, got %d", task.Version)
+	}
+}
+
+func TestTaskService_Claim_NoAvailableTask(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	seedTaskServiceTest(t, d)
+
+	// No tasks created => no available tasks
+	_, err := svc.Claim(ctx, "test-project", "test-feature", "agent-01")
+	if !errors.Is(err, ErrNoAvailableTask) {
+		t.Errorf("expected ErrNoAvailableTask, got %v", err)
+	}
+}
+
+func TestTaskService_Claim_AllTasksClaimed(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	_, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task 1", Priority: "P0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Claim the only task
+	_, err = svc.Claim(ctx, "test-project", "test-feature", "agent-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Try claiming again => no available tasks
+	_, err = svc.Claim(ctx, "test-project", "test-feature", "agent-02")
+	if !errors.Is(err, ErrNoAvailableTask) {
+		t.Errorf("expected ErrNoAvailableTask, got %v", err)
+	}
+}
+
+func TestTaskService_Claim_PriorityOrder(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{TaskID: "1.1", Title: "P1 Task", Priority: "P1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{TaskID: "1.2", Title: "P0 Task", Priority: "P0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := svc.Claim(ctx, "test-project", "test-feature", "agent-01")
+	if err != nil {
+		t.Fatalf("Claim() error: %v", err)
+	}
+	if task.TaskID != "1.2" {
+		t.Errorf("expected P0 task '1.2', got %q", task.TaskID)
+	}
+}
+
+func TestTaskService_Claim_DependencyUnmet(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Dep", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.2", Title: "Blocked", Priority: "P0",
+		Dependencies: []string{"1.1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := svc.Claim(ctx, "test-project", "test-feature", "agent-01")
+	if err != nil {
+		t.Fatalf("Claim() error: %v", err)
+	}
+	if task.TaskID != "1.1" {
+		t.Errorf("expected task '1.1', got %q", task.TaskID)
+	}
+}
+
+func TestTaskService_Claim_DependencyMet(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	t1, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Dep", Priority: "P0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExecContext(ctx, "UPDATE tasks SET status = 'completed' WHERE id = ?", t1.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.2", Title: "Ready", Priority: "P1",
+		Dependencies: []string{"1.1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := svc.Claim(ctx, "test-project", "test-feature", "agent-01")
+	if err != nil {
+		t.Fatalf("Claim() error: %v", err)
+	}
+	if task.TaskID != "1.2" {
+		t.Errorf("expected task '1.2', got %q", task.TaskID)
+	}
+}
+
+func TestTaskService_Claim_FeatureNotFound(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, err := db.GetOrCreateProject(ctx, d, "test-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.Claim(ctx, "test-project", "nonexistent-feature", "agent-01")
+	if !errors.Is(err, ErrNoAvailableTask) {
+		t.Errorf("expected ErrNoAvailableTask, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TaskService.UpdateStatus
+// ---------------------------------------------------------------------------
+
+func TestTaskService_UpdateStatus_Success(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := db.ClaimTask(ctx, d, featID, "agent-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.UpdateStatus(ctx, claimed.ID, "agent-01", "blocked")
+	if err != nil {
+		t.Fatalf("UpdateStatus() error: %v", err)
+	}
+
+	updated, err := db.GetTask(ctx, d, claimed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "blocked" {
+		t.Errorf("expected status 'blocked', got %q", updated.Status)
+	}
+}
+
+func TestTaskService_UpdateStatus_UnauthorizedAgent(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimTask(ctx, d, featID, "agent-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.UpdateStatus(ctx, claimed.ID, "agent-02", "blocked")
+	if !errors.Is(err, ErrUnauthorizedAgent) {
+		t.Errorf("expected ErrUnauthorizedAgent, got %v", err)
+	}
+}
+
+func TestTaskService_UpdateStatus_InvalidStatus(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimTask(ctx, d, featID, "agent-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.UpdateStatus(ctx, claimed.ID, "agent-01", "invalid_status")
+	if !errors.Is(err, ErrInvalidStatus) {
+		t.Errorf("expected ErrInvalidStatus, got %v", err)
+	}
+}
+
+func TestTaskService_UpdateStatus_TaskNotFound(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	err := svc.UpdateStatus(ctx, 99999, "agent-01", "in_progress")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestTaskService_UpdateStatus_CompletedNotValid(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimTask(ctx, d, featID, "agent-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// "completed" is not a valid status for UpdateStatus (should go through SubmitRecord)
+	err = svc.UpdateStatus(ctx, claimed.ID, "agent-01", "completed")
+	if !errors.Is(err, ErrInvalidStatus) {
+		t.Errorf("expected ErrInvalidStatus for 'completed', got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TaskService.SubmitRecord
+// ---------------------------------------------------------------------------
+
+func TestTaskService_SubmitRecord_Success(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimTask(ctx, d, featID, "agent-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	record := model.ExecutionRecord{
+		Summary:       "Completed the task",
+		FilesCreated:  `["file1.go"]`,
+		FilesModified: `["file2.go"]`,
+		TestsPassed:   10,
+		TestsFailed:   0,
+		Coverage:      85.5,
+	}
+
+	saved, err := svc.SubmitRecord(ctx, claimed.ID, "agent-01", record)
+	if err != nil {
+		t.Fatalf("SubmitRecord() error: %v", err)
+	}
+	if saved.ID <= 0 {
+		t.Error("expected positive record ID")
+	}
+	if saved.AgentID != "agent-01" {
+		t.Errorf("expected agent_id 'agent-01', got %q", saved.AgentID)
+	}
+	if saved.Summary != "Completed the task" {
+		t.Errorf("unexpected summary: %q", saved.Summary)
+	}
+
+	updated, err := db.GetTask(ctx, d, claimed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "completed" {
+		t.Errorf("expected status 'completed', got %q", updated.Status)
+	}
+}
+
+func TestTaskService_SubmitRecord_UnauthorizedAgent(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimTask(ctx, d, featID, "agent-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	record := model.ExecutionRecord{Summary: "hacked"}
+	_, err = svc.SubmitRecord(ctx, claimed.ID, "agent-02", record)
+	if !errors.Is(err, ErrUnauthorizedAgent) {
+		t.Errorf("expected ErrUnauthorizedAgent, got %v", err)
+	}
+}
+
+func TestTaskService_SubmitRecord_TaskNotFound(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	record := model.ExecutionRecord{Summary: "test"}
+	_, err := svc.SubmitRecord(ctx, 99999, "agent-01", record)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestTaskService_SubmitRecord_SetsTaskCompleted(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimTask(ctx, d, featID, "agent-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if claimed.Status != "in_progress" {
+		t.Fatalf("expected initial status 'in_progress', got %q", claimed.Status)
+	}
+
+	_, err = svc.SubmitRecord(ctx, claimed.ID, "agent-01", model.ExecutionRecord{
+		Summary: "done",
+	})
+	if err != nil {
+		t.Fatalf("SubmitRecord() error: %v", err)
+	}
+
+	task, err := db.GetTask(ctx, d, claimed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != "completed" {
+		t.Errorf("expected task status 'completed' after SubmitRecord, got %q", task.Status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TaskService.ListRecords
+// ---------------------------------------------------------------------------
+
+func TestTaskService_ListRecords_Empty(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	records, total, err := svc.ListRecords(ctx, 99999, 1, 10)
+	if err != nil {
+		t.Fatalf("ListRecords() error: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("expected total 0, got %d", total)
+	}
+	if len(records) != 0 {
+		t.Errorf("expected 0 records, got %d", len(records))
+	}
+}
+
+func TestTaskService_ListRecords_WithData(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Task", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimTask(ctx, d, featID, "agent-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range 3 {
+		_, err := db.InsertRecord(ctx, d, claimed.ID, model.ExecutionRecord{
+			AgentID: "agent-01",
+			Summary: fmt.Sprintf("Record %d", i+1),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	records, total, err := svc.ListRecords(ctx, claimed.ID, 1, 2)
+	if err != nil {
+		t.Fatalf("ListRecords() error: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("expected total 3, got %d", total)
+	}
+	if len(records) != 2 {
+		t.Errorf("expected 2 records on page 1, got %d", len(records))
+	}
+	if records[0].Summary != "Record 3" {
+		t.Errorf("expected first record 'Record 3', got %q", records[0].Summary)
+	}
+	if records[1].Summary != "Record 2" {
+		t.Errorf("expected second record 'Record 2', got %q", records[1].Summary)
+	}
+
+	page2, _, err := svc.ListRecords(ctx, claimed.ID, 2, 2)
+	if err != nil {
+		t.Fatalf("ListRecords() page 2 error: %v", err)
+	}
+	if len(page2) != 1 {
+		t.Errorf("expected 1 record on page 2, got %d", len(page2))
 	}
 }

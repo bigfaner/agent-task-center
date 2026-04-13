@@ -20,4 +20,7 @@ var (
 
 	// ErrUnauthorizedAgent indicates an agent attempted to modify a task claimed by a different agent.
 	ErrUnauthorizedAgent = errors.New("task claimed by different agent")
+
+	// ErrInvalidStatus indicates an invalid status value was provided.
+	ErrInvalidStatus = errors.New("invalid status")
 )

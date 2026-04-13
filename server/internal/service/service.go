@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -206,4 +207,195 @@ func (s *featureService) ListByProject(ctx context.Context, projectID int64) ([]
 
 func (s *featureService) GetTasks(ctx context.Context, featureID int64, filter model.TaskFilter) ([]model.Task, error) {
 	return db.ListTasksByFeature(ctx, s.db, featureID, filter)
+}
+
+// ---------------------------------------------------------------------------
+// TaskService
+// ---------------------------------------------------------------------------
+
+// validStatuses contains the set of status values accepted by UpdateStatus.
+var validStatuses = map[string]bool{
+	"in_progress": true,
+	"blocked":     true,
+	"pending":     true,
+}
+
+// TaskService handles business logic for tasks: claim, status update, and record submission.
+type TaskService interface {
+	Get(ctx context.Context, id int64) (*model.TaskDetail, error)
+	GetByTaskID(ctx context.Context, projectName, featureSlug, taskID string) (*model.TaskDetail, error)
+	ListRecords(ctx context.Context, taskID int64, page, pageSize int) ([]model.ExecutionRecord, int, error)
+	Claim(ctx context.Context, projectName, featureSlug, agentID string) (*model.Task, error)
+	UpdateStatus(ctx context.Context, taskID int64, agentID, status string) error
+	SubmitRecord(ctx context.Context, taskID int64, agentID string, record model.ExecutionRecord) (*model.ExecutionRecord, error)
+}
+
+type taskService struct {
+	db *sqlx.DB
+}
+
+// NewTaskService creates a new TaskService backed by the given database.
+func NewTaskService(db *sqlx.DB) TaskService {
+	return &taskService{db: db}
+}
+
+// Get returns the full detail of a task by its database ID.
+// Tags and Dependencies are deserialized from JSON strings to string slices.
+func (s *taskService) Get(ctx context.Context, id int64) (*model.TaskDetail, error) {
+	t, err := db.GetTask(ctx, s.db, id)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get task: %w", err)
+	}
+	return taskToDetail(t)
+}
+
+// GetByTaskID locates a task by the project+feature+taskId triple and returns its full detail.
+func (s *taskService) GetByTaskID(ctx context.Context, projectName, featureSlug, taskID string) (*model.TaskDetail, error) {
+	proj, err := db.GetOrCreateProject(ctx, s.db, projectName)
+	if err != nil {
+		return nil, fmt.Errorf("get project: %w", err)
+	}
+
+	feat, err := db.GetFeatureBySlug(ctx, s.db, proj.ID, featureSlug)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get feature: %w", err)
+	}
+
+	t, err := db.GetTaskByTaskID(ctx, s.db, feat.ID, taskID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get task by task_id: %w", err)
+	}
+
+	return taskToDetail(t)
+}
+
+// ListRecords returns paginated execution records for a task.
+func (s *taskService) ListRecords(ctx context.Context, taskID int64, page, pageSize int) ([]model.ExecutionRecord, int, error) {
+	return db.ListRecordsByTask(ctx, s.db, taskID, page, pageSize)
+}
+
+// Claim finds and claims the highest-priority pending task with met dependencies
+// under the specified project+feature, using optimistic locking.
+func (s *taskService) Claim(ctx context.Context, projectName, featureSlug, agentID string) (*model.Task, error) {
+	proj, err := db.GetOrCreateProject(ctx, s.db, projectName)
+	if err != nil {
+		return nil, fmt.Errorf("get project: %w", err)
+	}
+
+	feat, err := db.GetFeatureBySlug(ctx, s.db, proj.ID, featureSlug)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, ErrNoAvailableTask
+		}
+		return nil, fmt.Errorf("get feature: %w", err)
+	}
+
+	task, err := db.ClaimTask(ctx, s.db, feat.ID, agentID)
+	if err != nil {
+		if errors.Is(err, db.ErrNoAvailableTask) {
+			return nil, ErrNoAvailableTask
+		}
+		return nil, fmt.Errorf("claim task: %w", err)
+	}
+
+	return task, nil
+}
+
+// UpdateStatus changes a task's status after verifying the agent owns it.
+// Valid status values are: in_progress, blocked, pending.
+func (s *taskService) UpdateStatus(ctx context.Context, taskID int64, agentID, status string) error {
+	if !validStatuses[status] {
+		return ErrInvalidStatus
+	}
+
+	err := db.UpdateTaskStatus(ctx, s.db, taskID, agentID, status)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return ErrNotFound
+		}
+		if errors.Is(err, db.ErrUnauthorizedAgent) {
+			return ErrUnauthorizedAgent
+		}
+		if errors.Is(err, db.ErrVersionConflict) {
+			return ErrVersionConflict
+		}
+		return fmt.Errorf("update task status: %w", err)
+	}
+
+	return nil
+}
+
+// SubmitRecord inserts an execution record and marks the task as completed.
+// It verifies that the agentID matches the task's claimed_by field.
+func (s *taskService) SubmitRecord(ctx context.Context, taskID int64, agentID string, record model.ExecutionRecord) (*model.ExecutionRecord, error) {
+	// Verify the task exists and the agent owns it
+	t, err := db.GetTask(ctx, s.db, taskID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get task: %w", err)
+	}
+
+	if t.ClaimedBy != agentID {
+		return nil, ErrUnauthorizedAgent
+	}
+
+	// Insert the execution record
+	record.AgentID = agentID
+	saved, err := db.InsertRecord(ctx, s.db, taskID, record)
+	if err != nil {
+		return nil, fmt.Errorf("insert record: %w", err)
+	}
+
+	// Update task status to completed
+	err = db.UpdateTaskStatus(ctx, s.db, taskID, agentID, "completed")
+	if err != nil {
+		if errors.Is(err, db.ErrUnauthorizedAgent) {
+			return nil, ErrUnauthorizedAgent
+		}
+		if errors.Is(err, db.ErrVersionConflict) {
+			return nil, ErrVersionConflict
+		}
+		return nil, fmt.Errorf("update task to completed: %w", err)
+	}
+
+	return saved, nil
+}
+
+// taskToDetail converts a model.Task to a model.TaskDetail by deserializing
+// the Tags and Dependencies JSON fields.
+func taskToDetail(t *model.Task) (*model.TaskDetail, error) {
+	var tags []string
+	if err := json.Unmarshal([]byte(t.Tags), &tags); err != nil {
+		tags = []string{}
+	}
+
+	var deps []string
+	if err := json.Unmarshal([]byte(t.Dependencies), &deps); err != nil {
+		deps = []string{}
+	}
+
+	return &model.TaskDetail{
+		ID:           t.ID,
+		TaskID:       t.TaskID,
+		Title:        t.Title,
+		Description:  t.Description,
+		Status:       t.Status,
+		Priority:     t.Priority,
+		Tags:         tags,
+		ClaimedBy:    t.ClaimedBy,
+		Dependencies: deps,
+		CreatedAt:    t.CreatedAt,
+		UpdatedAt:    t.UpdatedAt,
+	}, nil
 }
