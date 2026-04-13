@@ -1,15 +1,19 @@
 interface EmptyStateProps {
-  message: string
+  title: string
+  description?: string
   action?: {
     label: string
     onClick: () => void
   }
 }
 
-export function EmptyState({ message, action }: EmptyStateProps) {
+export function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center">
-      <p className="text-muted-foreground">{message}</p>
+      <p className="text-lg font-medium text-foreground">{title}</p>
+      {description && (
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      )}
       {action && (
         <button
           type="button"
