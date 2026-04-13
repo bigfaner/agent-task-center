@@ -131,7 +131,7 @@
       "dependencies": [
         "3.2"
       ],
-      "status": "pending",
+      "status": "completed",
       "file": "3.5-agent-handlers.md",
       "record": "records/3.5-agent-handlers.md"
     },
