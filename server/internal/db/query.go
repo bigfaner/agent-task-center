@@ -265,6 +265,19 @@ func ListFeaturesByProject(ctx context.Context, db *sqlx.DB, projectID int64) ([
 	return features, nil
 }
 
+// GetFeature returns a single feature by ID.
+func GetFeature(ctx context.Context, db *sqlx.DB, id int64) (*model.Feature, error) {
+	var f model.Feature
+	err := db.GetContext(ctx, &f, "SELECT * FROM features WHERE id = ?", id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get feature: %w", err)
+	}
+	return &f, nil
+}
+
 // GetFeatureBySlug returns a single feature by project ID and slug.
 func GetFeatureBySlug(ctx context.Context, db *sqlx.DB, projectID int64, slug string) (*model.Feature, error) {
 	var f model.Feature

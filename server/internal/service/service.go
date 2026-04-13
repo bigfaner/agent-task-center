@@ -157,6 +157,7 @@ func (s *projectService) Get(ctx context.Context, id int64) (*model.ProjectDetai
 type FeatureService interface {
 	ListByProject(ctx context.Context, projectID int64) ([]model.FeatureSummary, error)
 	GetTasks(ctx context.Context, featureID int64, filter model.TaskFilter) ([]model.Task, error)
+	GetByID(ctx context.Context, id int64) (*model.Feature, error)
 }
 
 type featureService struct {
@@ -207,6 +208,48 @@ func (s *featureService) ListByProject(ctx context.Context, projectID int64) ([]
 
 func (s *featureService) GetTasks(ctx context.Context, featureID int64, filter model.TaskFilter) ([]model.Task, error) {
 	return db.ListTasksByFeature(ctx, s.db, featureID, filter)
+}
+
+// GetByID returns a feature by its database ID.
+func (s *featureService) GetByID(ctx context.Context, id int64) (*model.Feature, error) {
+	f, err := db.GetFeature(ctx, s.db, id)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get feature: %w", err)
+	}
+	return f, nil
+}
+
+// ---------------------------------------------------------------------------
+// ProposalService
+// ---------------------------------------------------------------------------
+
+// ProposalService handles business logic for proposals.
+type ProposalService interface {
+	GetByID(ctx context.Context, id int64) (*model.Proposal, error)
+}
+
+type proposalService struct {
+	db *sqlx.DB
+}
+
+// NewProposalService creates a new ProposalService backed by the given database.
+func NewProposalService(db *sqlx.DB) ProposalService {
+	return &proposalService{db: db}
+}
+
+// GetByID returns a proposal by its database ID.
+func (s *proposalService) GetByID(ctx context.Context, id int64) (*model.Proposal, error) {
+	p, err := db.GetProposal(ctx, s.db, id)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get proposal: %w", err)
+	}
+	return p, nil
 }
 
 // ---------------------------------------------------------------------------
