@@ -1389,3 +1389,265 @@ func TestTaskService_ListRecords_WithData(t *testing.T) {
 		t.Errorf("expected 1 record on page 2, got %d", len(page2))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TaskService.Claim — Optimistic Lock
+// ---------------------------------------------------------------------------
+
+func TestTaskService_Claim_OptimisticLock(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	// Create a single pending task
+	if _, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Contested Task", Priority: "P0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// First claim succeeds — agent-01 gets the task
+	task1, err := svc.Claim(ctx, "test-project", "test-feature", "agent-01")
+	if err != nil {
+		t.Fatalf("first claim should succeed: %v", err)
+	}
+	if task1.ClaimedBy != "agent-01" {
+		t.Errorf("expected claimed_by 'agent-01', got %q", task1.ClaimedBy)
+	}
+	if task1.Version != 1 {
+		t.Errorf("expected version 1, got %d", task1.Version)
+	}
+
+	// Second claim by a different agent fails — no more pending tasks
+	_, err = svc.Claim(ctx, "test-project", "test-feature", "agent-02")
+	if !errors.Is(err, ErrNoAvailableTask) {
+		t.Errorf("expected ErrNoAvailableTask when all tasks claimed, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TaskService — UpsertTask Idempotent
+// ---------------------------------------------------------------------------
+
+func TestTaskService_UpsertTask_Idempotent(t *testing.T) {
+	d := openServiceTestDB(t)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	// First upsert — no dependencies so it can be claimed
+	task1, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Original Title", Description: "Original Desc", Priority: "P0",
+		Tags: []string{"core"},
+	})
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if task1.Status != "pending" {
+		t.Errorf("expected initial status 'pending', got %q", task1.Status)
+	}
+
+	// Claim the task
+	claimed, err := db.ClaimTask(ctx, d, featID, "agent-01")
+	if err != nil {
+		t.Fatalf("claim task: %v", err)
+	}
+	if claimed.Status != "in_progress" {
+		t.Fatalf("expected status 'in_progress' after claim, got %q", claimed.Status)
+	}
+
+	// Second upsert with same task_id — should NOT overwrite status or claimed_by
+	task2, err := db.UpsertTask(ctx, d, featID, model.TaskInput{
+		TaskID: "1.1", Title: "Updated Title", Description: "Updated Desc", Priority: "P1",
+		Tags: []string{"new-tag"},
+	})
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+
+	// Status and claimed_by should be preserved
+	if task2.Status != "in_progress" {
+		t.Errorf("expected status preserved as 'in_progress', got %q", task2.Status)
+	}
+	if task2.ClaimedBy != "agent-01" {
+		t.Errorf("expected claimed_by preserved as 'agent-01', got %q", task2.ClaimedBy)
+	}
+	// Title and description should be updated
+	if task2.Title != "Updated Title" {
+		t.Errorf("expected title updated to 'Updated Title', got %q", task2.Title)
+	}
+	if task2.Description != "Updated Desc" {
+		t.Errorf("expected description updated, got %q", task2.Description)
+	}
+	if task2.Priority != "P1" {
+		t.Errorf("expected priority updated to 'P1', got %q", task2.Priority)
+	}
+}
+
+// ===========================================================================
+// FeatureService.GetByID tests
+// ===========================================================================
+
+func TestFeatureService_GetByID_Found(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewFeatureService(d)
+	ctx := context.Background()
+
+	proj, err := db.GetOrCreateProject(ctx, d, "proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := db.UpsertFeature(ctx, d, proj.ID, model.FeatureInput{
+		Slug: "feat-1", Name: "Feature 1", Status: "prd", Content: "content",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.GetByID(ctx, f.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	if result.ID != f.ID {
+		t.Errorf("expected ID %d, got %d", f.ID, result.ID)
+	}
+	if result.Slug != "feat-1" {
+		t.Errorf("expected slug 'feat-1', got %q", result.Slug)
+	}
+	if result.Name != "Feature 1" {
+		t.Errorf("expected name 'Feature 1', got %q", result.Name)
+	}
+	if result.Status != "prd" {
+		t.Errorf("expected status 'prd', got %q", result.Status)
+	}
+}
+
+func TestFeatureService_GetByID_NotFound(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewFeatureService(d)
+	ctx := context.Background()
+
+	_, err := svc.GetByID(ctx, 99999)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ===========================================================================
+// ProposalService tests
+// ===========================================================================
+
+func TestProposalService_GetByID_Found(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewProposalService(d)
+	ctx := context.Background()
+
+	proj, err := db.GetOrCreateProject(ctx, d, "proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prop, err := db.UpsertProposal(ctx, d, proj.ID, model.ProposalInput{
+		Slug: "my-proposal", Title: "My Proposal", Content: "# Hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.GetByID(ctx, prop.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	if result.ID != prop.ID {
+		t.Errorf("expected ID %d, got %d", prop.ID, result.ID)
+	}
+	if result.Slug != "my-proposal" {
+		t.Errorf("expected slug 'my-proposal', got %q", result.Slug)
+	}
+	if result.Title != "My Proposal" {
+		t.Errorf("expected title 'My Proposal', got %q", result.Title)
+	}
+}
+
+func TestProposalService_GetByID_NotFound(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewProposalService(d)
+	ctx := context.Background()
+
+	_, err := svc.GetByID(ctx, 99999)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TaskService — taskToDetail edge cases
+// ---------------------------------------------------------------------------
+
+func TestTaskService_Get_InvalidJSONFields(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewTaskService(d)
+	ctx := context.Background()
+
+	_, featID := seedTaskServiceTest(t, d)
+
+	// Insert a task with raw SQL to set invalid JSON for tags/dependencies
+	result, err := d.ExecContext(ctx,
+		`INSERT INTO tasks (feature_id, task_id, title, description, status, priority, tags, dependencies, created_at, updated_at)
+		 VALUES (?, '1.1', 'Bad JSON Task', '', 'pending', 'P0', 'not-valid-json', 'also-bad', datetime('now'), datetime('now'))`,
+		featID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := result.LastInsertId()
+
+	// Get should handle invalid JSON gracefully by returning empty slices
+	detail, err := svc.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if len(detail.Tags) != 0 {
+		t.Errorf("expected empty tags for invalid JSON, got %v", detail.Tags)
+	}
+	if len(detail.Dependencies) != 0 {
+		t.Errorf("expected empty dependencies for invalid JSON, got %v", detail.Dependencies)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// extractFeatureSlug edge cases
+// ---------------------------------------------------------------------------
+
+func TestUploadService_PushDocs_NoFeatureSlug(t *testing.T) {
+	d := openServiceTestDB(t)
+	svc := NewUploadService(d)
+	ctx := context.Background()
+
+	// File with no docs/features/ prefix — feature slug will be empty string
+	indexJSON := `{"tasks":{"1.1":{"id":"1.1","title":"No Slug Task","priority":"P0"}}}`
+
+	files := []UploadFile{
+		{Path: "other/path/index.json", Filename: "index.json", Content: []byte(indexJSON)},
+	}
+
+	summaries, err := svc.PushDocs(ctx, "noslug-project", files)
+	if err != nil {
+		t.Fatalf("PushDocs() error: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+
+	// Feature should be auto-created with empty string slug
+	proj, _ := db.GetOrCreateProject(ctx, d, "noslug-project")
+	features, _ := db.ListFeaturesByProject(ctx, d, proj.ID)
+	if len(features) != 1 {
+		t.Fatalf("expected 1 feature auto-created, got %d", len(features))
+	}
+	if features[0].Slug != "" {
+		t.Errorf("expected empty slug, got %q", features[0].Slug)
+	}
+}
