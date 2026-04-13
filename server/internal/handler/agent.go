@@ -68,15 +68,15 @@ type statusRequest struct {
 
 // recordRequest is the JSON body for POST /api/agent/tasks/{taskId}/records.
 type recordRequest struct {
-	AgentID            string                   `json:"agentId"`
-	Summary            string                   `json:"summary"`
-	FilesCreated       []string                 `json:"filesCreated"`
-	FilesModified      []string                 `json:"filesModified"`
-	KeyDecisions       []string                 `json:"keyDecisions"`
-	TestsPassed        int                      `json:"testsPassed"`
-	TestsFailed        int                      `json:"testsFailed"`
-	Coverage           float64                  `json:"coverage"`
-	AcceptanceCriteria []map[string]interface{} `json:"acceptanceCriteria"`
+	AgentID            string           `json:"agentId"`
+	Summary            string           `json:"summary"`
+	FilesCreated       []string         `json:"filesCreated"`
+	FilesModified      []string         `json:"filesModified"`
+	KeyDecisions       []string         `json:"keyDecisions"`
+	TestsPassed        int              `json:"testsPassed"`
+	TestsFailed        int              `json:"testsFailed"`
+	Coverage           float64          `json:"coverage"`
+	AcceptanceCriteria []map[string]any `json:"acceptanceCriteria"`
 }
 
 // ---------------------------------------------------------------------------
@@ -187,9 +187,9 @@ func (h *AgentHandler) SubmitRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"recordId":    saved.ID,
-		"taskStatus":  "completed",
+	respondJSON(w, http.StatusOK, map[string]any{
+		"recordId":   saved.ID,
+		"taskStatus": "completed",
 	})
 }
 

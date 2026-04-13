@@ -24,10 +24,10 @@ import (
 // mockAgentTaskService implements TaskClaimer for agent handler tests.
 type mockAgentTaskService struct {
 	// Claim
-	claimTask    *model.Task
-	claimErr     error
-	claimCalled  bool
-	claimInput   claimInput
+	claimTask   *model.Task
+	claimErr    error
+	claimCalled bool
+	claimInput  claimInput
 
 	// UpdateStatus
 	updateStatusErr    error
@@ -442,8 +442,8 @@ func TestUpdateTaskStatus_MissingFields(t *testing.T) {
 func TestSubmitRecord_Success(t *testing.T) {
 	ts := &mockAgentTaskService{
 		submitRecordResult: &model.ExecutionRecord{
-			ID:     42,
-			TaskID: 102,
+			ID:      42,
+			TaskID:  102,
 			AgentID: "agent-01",
 		},
 	}
@@ -451,8 +451,8 @@ func TestSubmitRecord_Success(t *testing.T) {
 	router := setupAgentRouter(handler)
 
 	body := map[string]interface{}{
-		"agentId":  "agent-01",
-		"summary":  "Implemented DB schema",
+		"agentId":       "agent-01",
+		"summary":       "Implemented DB schema",
 		"filesCreated":  []string{"server/internal/db/schema.sql"},
 		"filesModified": []string{"server/go.mod"},
 		"keyDecisions":  []string{"used golang-migrate"},
@@ -614,7 +614,7 @@ func TestGetTaskContent_Success(t *testing.T) {
 		getByTaskIDResult: &model.TaskDetail{
 			TaskID: "1.2", Title: "Implement DB schema",
 			Description: "## Task desc\n\nImplement all DDL",
-			Status: "in_progress", Priority: "P0",
+			Status:      "in_progress", Priority: "P0",
 			Tags: []string{"core", "db"}, Dependencies: []string{"1.1"},
 			ClaimedBy: "agent-01",
 		},
@@ -928,4 +928,3 @@ func BenchmarkClaimTask(b *testing.B) {
 		router.ServeHTTP(w, req)
 	}
 }
-

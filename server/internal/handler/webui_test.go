@@ -153,17 +153,17 @@ func TestListProjects_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 
 	assert.Equal(t, float64(1), body["total"])
 	assert.Equal(t, float64(1), body["page"])
 	assert.Equal(t, float64(20), body["pageSize"])
 
-	items := body["items"].([]interface{})
+	items := body["items"].([]any)
 	require.Len(t, items, 1)
 
-	item := items[0].(map[string]interface{})
+	item := items[0].(map[string]any)
 	assert.Equal(t, "proj-a", item["name"])
 	assert.Equal(t, float64(62.5), item["completionRate"])
 }
@@ -199,7 +199,7 @@ func TestListProjects_DefaultPagination(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 	assert.Equal(t, float64(1), body["page"])
 	assert.Equal(t, float64(20), body["pageSize"])
@@ -249,14 +249,14 @@ func TestGetProject_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 	assert.Equal(t, "agent-task-center", body["name"])
 
-	proposals := body["proposals"].([]interface{})
+	proposals := body["proposals"].([]any)
 	assert.Len(t, proposals, 1)
 
-	features := body["features"].([]interface{})
+	features := body["features"].([]any)
 	assert.Len(t, features, 1)
 }
 
@@ -313,16 +313,16 @@ func TestGetFeatureTasks_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 
 	assert.Equal(t, float64(1), body["featureId"])
 	assert.Equal(t, "Agent Task Center", body["featureName"])
 
-	tasks := body["tasks"].([]interface{})
+	tasks := body["tasks"].([]any)
 	require.Len(t, tasks, 1)
 
-	task := tasks[0].(map[string]interface{})
+	task := tasks[0].(map[string]any)
 	assert.Equal(t, "1.1", task["taskId"])
 	assert.Equal(t, "completed", task["status"])
 	assert.Equal(t, "P0", task["priority"])
@@ -400,13 +400,13 @@ func TestGetTask_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 	assert.Equal(t, "1.1", body["taskId"])
 	assert.Equal(t, "Init project", body["title"])
 	assert.Equal(t, "## Task desc", body["description"])
 
-	tags := body["tags"].([]interface{})
+	tags := body["tags"].([]any)
 	assert.Contains(t, tags, "core")
 	assert.Contains(t, tags, "setup")
 }
@@ -470,17 +470,17 @@ func TestListTaskRecords_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 
 	assert.Equal(t, float64(1), body["total"])
 	assert.Equal(t, float64(1), body["page"])
 	assert.Equal(t, float64(10), body["pageSize"])
 
-	items := body["items"].([]interface{})
+	items := body["items"].([]any)
 	require.Len(t, items, 1)
 
-	item := items[0].(map[string]interface{})
+	item := items[0].(map[string]any)
 	assert.Equal(t, "agent-01", item["agentId"])
 	assert.Equal(t, "Implemented feature", item["summary"])
 }
@@ -499,7 +499,7 @@ func TestListTaskRecords_DefaultPagination(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 	assert.Equal(t, float64(1), body["page"])
 	assert.Equal(t, float64(10), body["pageSize"])
@@ -542,7 +542,7 @@ func TestGetProposalContent_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 	assert.Equal(t, "Proposal: Agent Task Center", body["title"])
 	assert.Contains(t, body["content"], "# Proposal")
@@ -603,7 +603,7 @@ func TestGetFeatureContent_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 	assert.Equal(t, "Agent Task Center", body["title"])
 	assert.Contains(t, body["content"], "Feature content here")
@@ -764,24 +764,24 @@ func TestGetFeatureTasks_TaskSummaryFormat(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 
-	tasks := body["tasks"].([]interface{})
+	tasks := body["tasks"].([]any)
 	require.Len(t, tasks, 1)
 
-	task := tasks[0].(map[string]interface{})
+	task := tasks[0].(map[string]any)
 	assert.Equal(t, float64(101), task["id"])
 	assert.Equal(t, "1.1", task["taskId"])
 	assert.Equal(t, "Init", task["title"])
 	assert.Equal(t, "pending", task["status"])
 	assert.Equal(t, "P0", task["priority"])
 
-	tags := task["tags"].([]interface{})
+	tags := task["tags"].([]any)
 	assert.Contains(t, tags, "core")
 	assert.Contains(t, tags, "setup")
 
-	deps := task["dependencies"].([]interface{})
+	deps := task["dependencies"].([]any)
 	assert.Contains(t, deps, "1.0")
 
 	assert.Equal(t, "agent-01", task["claimedBy"])
@@ -805,7 +805,7 @@ func TestListProjects_CustomPagination(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 	assert.Equal(t, float64(3), body["page"])
 	assert.Equal(t, float64(5), body["pageSize"])
@@ -830,10 +830,10 @@ func TestListProjects_EmptyResult(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 
-	items := body["items"].([]interface{})
+	items := body["items"].([]any)
 	assert.Len(t, items, 0)
 	assert.Equal(t, float64(0), body["total"])
 }
@@ -852,10 +852,10 @@ func TestGetFeatureTasks_EmptyTasks(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 
-	tasks := body["tasks"].([]interface{})
+	tasks := body["tasks"].([]any)
 	assert.Len(t, tasks, 0)
 }
 
