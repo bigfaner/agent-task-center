@@ -84,7 +84,7 @@ func (h *WebUIHandler) RegisterRoutes(r chi.Router) {
 // ---------------------------------------------------------------------------
 
 // respondJSON writes a JSON response with the given status code.
-func respondJSON(w http.ResponseWriter, status int, v interface{}) {
+func respondJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
@@ -179,7 +179,7 @@ func (h *WebUIHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"items":    items,
 		"total":    total,
 		"page":     page,
@@ -250,7 +250,7 @@ func (h *WebUIHandler) GetFeatureTasks(w http.ResponseWriter, r *http.Request) {
 		summaries = append(summaries, taskToSummary(t))
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"featureId":   feature.ID,
 		"featureName": feature.Name,
 		"tasks":       summaries,
@@ -291,7 +291,7 @@ func (h *WebUIHandler) ListTaskRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"items":    records,
 		"total":    total,
 		"page":     page,
@@ -313,7 +313,7 @@ func (h *WebUIHandler) GetProposalContent(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"title":   proposal.Title,
 		"content": proposal.Content,
 	})
@@ -333,7 +333,7 @@ func (h *WebUIHandler) GetFeatureContent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"title":   feature.Name,
 		"content": feature.Content,
 	})

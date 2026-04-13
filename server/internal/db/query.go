@@ -30,7 +30,7 @@ var (
 	ErrUnauthorizedAgent = errors.New("task claimed by different agent")
 )
 
-func jsonMarshal(v interface{}) ([]byte, error) {
+func jsonMarshal(v any) ([]byte, error) {
 	return json.Marshal(v)
 }
 
@@ -77,7 +77,7 @@ func ListProjects(ctx context.Context, db *sqlx.DB, search string, page, pageSiz
 	countQuery := "SELECT count(*) FROM projects"
 	listQuery := "SELECT * FROM projects"
 
-	var args []interface{}
+	var args []any
 	if search != "" {
 		where := " WHERE name LIKE ?"
 		countQuery += where
@@ -379,7 +379,7 @@ func UpsertTask(ctx context.Context, db *sqlx.DB, featureID int64, input model.T
 // ListTasksByFeature returns tasks for a feature with optional filtering.
 func ListTasksByFeature(ctx context.Context, db *sqlx.DB, featureID int64, filter model.TaskFilter) ([]model.Task, error) {
 	query := "SELECT * FROM tasks WHERE feature_id = ?"
-	var args []interface{}
+	var args []any
 	args = append(args, featureID)
 
 	if len(filter.Statuses) > 0 {
