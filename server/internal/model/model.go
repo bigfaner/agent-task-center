@@ -54,8 +54,8 @@ type Task struct {
 	Description  string    `db:"description"   json:"description"`
 	Status       string    `db:"status"        json:"status"`
 	Priority     string    `db:"priority"      json:"priority"`
-	Tags         string    `db:"tags"          json:"-"`         // JSON string in DB
-	Dependencies string    `db:"dependencies"  json:"-"`         // JSON string in DB
+	Tags         string    `db:"tags"          json:"-"` // JSON string in DB
+	Dependencies string    `db:"dependencies"  json:"-"` // JSON string in DB
 	ClaimedBy    string    `db:"claimed_by"    json:"claimedBy"`
 	Version      int64     `db:"version"       json:"version"`
 	CreatedAt    time.Time `db:"created_at"    json:"createdAt"`

@@ -384,16 +384,12 @@ func TestFeatureService_ListByProject(t *testing.T) {
 	svc := NewFeatureService(d)
 	ctx := context.Background()
 
-	pid := int64(1)
-	if _, err := db.GetOrCreateProject(ctx, d, "proj"); err != nil {
-		t.Fatal(err)
-	}
 	// Get the actual ID
 	proj, err := db.GetOrCreateProject(ctx, d, "proj")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pid = proj.ID
+	pid := proj.ID
 
 	// Create features
 	if _, err := db.UpsertFeature(ctx, d, pid, model.FeatureInput{
