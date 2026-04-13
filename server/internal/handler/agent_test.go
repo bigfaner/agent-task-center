@@ -143,7 +143,7 @@ func TestClaimTask_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, float64(102), resp["id"])
 	assert.Equal(t, "1.2", resp["taskId"])
@@ -279,7 +279,7 @@ func TestUpdateTaskStatus_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, true, resp["ok"])
 
@@ -450,7 +450,7 @@ func TestSubmitRecord_Success(t *testing.T) {
 	handler := NewAgentHandler(ts)
 	router := setupAgentRouter(handler)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"agentId":       "agent-01",
 		"summary":       "Implemented DB schema",
 		"filesCreated":  []string{"server/internal/db/schema.sql"},
@@ -459,7 +459,7 @@ func TestSubmitRecord_Success(t *testing.T) {
 		"testsPassed":   8,
 		"testsFailed":   0,
 		"coverage":      78.5,
-		"acceptanceCriteria": []map[string]interface{}{
+		"acceptanceCriteria": []map[string]any{
 			{"criterion": "All tables created", "met": true},
 			{"criterion": "Migrations rollback", "met": true},
 		},
@@ -473,7 +473,7 @@ func TestSubmitRecord_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, float64(42), resp["recordId"])
 	assert.Equal(t, "completed", resp["taskStatus"])
@@ -492,7 +492,7 @@ func TestSubmitRecord_UnauthorizedAgent(t *testing.T) {
 	handler := NewAgentHandler(ts)
 	router := setupAgentRouter(handler)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"agentId": "agent-02",
 		"summary": "Some summary",
 	}
@@ -517,7 +517,7 @@ func TestSubmitRecord_NotFound(t *testing.T) {
 	handler := NewAgentHandler(ts)
 	router := setupAgentRouter(handler)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"agentId": "agent-01",
 		"summary": "Some summary",
 	}
@@ -540,7 +540,7 @@ func TestSubmitRecord_InvalidTaskID(t *testing.T) {
 	handler := NewAgentHandler(ts)
 	router := setupAgentRouter(handler)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"agentId": "agent-01",
 		"summary": "Some summary",
 	}
@@ -578,10 +578,10 @@ func TestSubmitRecord_InvalidJSON(t *testing.T) {
 func TestSubmitRecord_MissingRequiredFields(t *testing.T) {
 	tests := []struct {
 		name string
-		body map[string]interface{}
+		body map[string]any
 	}{
-		{"missing agentId", map[string]interface{}{"summary": "s"}},
-		{"missing summary", map[string]interface{}{"agentId": "a1"}},
+		{"missing agentId", map[string]any{"summary": "s"}},
+		{"missing summary", map[string]any{"agentId": "a1"}},
 	}
 
 	for _, tt := range tests {
@@ -628,7 +628,7 @@ func TestGetTaskContent_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, "1.2", resp["taskId"])
 	assert.Equal(t, "Implement DB schema", resp["title"])
@@ -636,11 +636,11 @@ func TestGetTaskContent_Success(t *testing.T) {
 	assert.Equal(t, "P0", resp["priority"])
 	assert.Equal(t, "agent-01", resp["claimedBy"])
 
-	tags := resp["tags"].([]interface{})
+	tags := resp["tags"].([]any)
 	assert.Contains(t, tags, "core")
 	assert.Contains(t, tags, "db")
 
-	deps := resp["dependencies"].([]interface{})
+	deps := resp["dependencies"].([]any)
 	assert.Contains(t, deps, "1.1")
 
 	// Verify service was called correctly
@@ -787,7 +787,7 @@ func TestSubmitRecord_VersionConflict(t *testing.T) {
 	handler := NewAgentHandler(ts)
 	router := setupAgentRouter(handler)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"agentId": "agent-01",
 		"summary": "Summary",
 	}
@@ -834,14 +834,14 @@ func TestClaimTask_ResponseFieldsWithTagsAndDeps(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 
-	tags := resp["tags"].([]interface{})
+	tags := resp["tags"].([]any)
 	assert.Contains(t, tags, "backend")
 	assert.Contains(t, tags, "migration")
 
-	deps := resp["dependencies"].([]interface{})
+	deps := resp["dependencies"].([]any)
 	assert.Contains(t, deps, "1.2")
 	assert.Contains(t, deps, "1.3")
 }
@@ -880,7 +880,7 @@ func TestSubmitRecord_OptionalFieldsOmitted(t *testing.T) {
 	handler := NewAgentHandler(ts)
 	router := setupAgentRouter(handler)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"agentId": "agent-01",
 		"summary": "Did the work",
 	}
@@ -893,7 +893,7 @@ func TestSubmitRecord_OptionalFieldsOmitted(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, float64(1), resp["recordId"])
 	assert.Equal(t, "completed", resp["taskStatus"])
